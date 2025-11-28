@@ -3,12 +3,16 @@
  * Flowing particle field creating ambient atmosphere
  */
 
+// Skip animation on mobile/touch devices for performance
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 // Particles for ambient animation
 let particles = [];
 let flowField;
 let cols, rows;
 const scl = 30;
-const particleCount = 150;
+const particleCount = isTouchDevice ? 0 : 150; // No particles on mobile
 let zoff = 0;
 
 // Colors matching the theme
@@ -22,6 +26,12 @@ const particleColors = [
 ];
 
 function setup() {
+    // Skip setup entirely on mobile/touch or reduced motion
+    if (isTouchDevice || prefersReducedMotion) {
+        noCanvas();
+        return;
+    }
+
     // Create canvas in the container
     const container = document.getElementById('p5-container');
     const canvas = createCanvas(windowWidth, windowHeight);
@@ -42,6 +52,11 @@ function setup() {
 }
 
 function draw() {
+    // Skip drawing on mobile/touch
+    if (isTouchDevice || prefersReducedMotion) {
+        return;
+    }
+
     // Semi-transparent background for trails
     background(bgColor[0], bgColor[1], bgColor[2], 25);
 

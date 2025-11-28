@@ -226,10 +226,16 @@ function setupEventListeners() {
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseleave', handleMouseLeave);
 
-    // Touch events
+    // Touch events - improved for mobile
     canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
     canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
-    canvas.addEventListener('touchend', handleTouchEnd);
+    canvas.addEventListener('touchend', handleTouchEnd, { passive: true });
+    canvas.addEventListener('touchcancel', handleTouchEnd, { passive: true });
+
+    // Detect touch device and adjust behavior
+    if ('ontouchstart' in window) {
+        document.body.classList.add('touch-device');
+    }
 
     // Mode toggle buttons
     document.querySelectorAll('.mode-btn[data-group="view"]').forEach(btn => {
@@ -314,30 +320,65 @@ function handleMouseLeave() {
     handlePointerLeave();
 }
 
+let lastTouchTime = 0;
+let touchActive = false;
+
 function handleTouchStart(e) {
-    e.preventDefault();
-    if (e.touches.length === 1) {
-        const rect = canvas.getBoundingClientRect();
-        const touch = e.touches[0];
-        handlePointerMove(touch.clientX - rect.left, touch.clientY - rect.top);
+    // Only prevent default if we're interacting with a point
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    const mouseX = touch.clientX - rect.left;
+    const mouseY = touch.clientY - rect.top;
+
+    // Check if touch is near a point
+    let nearPoint = false;
+    for (const point of points) {
+        const [px, py] = dataToScreen(point.x, point.y);
+        const dist = Math.hypot(mouseX - px, mouseY - py);
+        if (dist < 40) { // Larger touch target
+            nearPoint = true;
+            break;
+        }
     }
+
+    if (nearPoint) {
+        e.preventDefault();
+    }
+
+    touchActive = true;
+    lastTouchTime = Date.now();
+    handlePointerMove(mouseX, mouseY, 40); // Larger threshold for touch
 }
 
 function handleTouchMove(e) {
-    e.preventDefault();
-    if (e.touches.length === 1) {
-        const rect = canvas.getBoundingClientRect();
-        const touch = e.touches[0];
-        handlePointerMove(touch.clientX - rect.left, touch.clientY - rect.top);
+    if (!touchActive) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    const mouseX = touch.clientX - rect.left;
+    const mouseY = touch.clientY - rect.top;
+
+    // Only prevent default if we have a hovered point
+    if (hoveredPoint) {
+        e.preventDefault();
     }
+
+    handlePointerMove(mouseX, mouseY, 40);
 }
 
 function handleTouchEnd() {
-    // Keep panel visible on touch devices until next touch
+    touchActive = false;
+    // On touch devices, keep the panel visible for a moment after touch ends
+    // Clear after 3 seconds of no interaction
+    setTimeout(() => {
+        if (Date.now() - lastTouchTime > 2900) {
+            handlePointerLeave();
+        }
+    }, 3000);
 }
 
-function handlePointerMove(mouseX, mouseY) {
-    const threshold = 25;
+function handlePointerMove(mouseX, mouseY, customThreshold) {
+    const threshold = customThreshold || 25;
     let nearest = null;
     let minDist = Infinity;
 
