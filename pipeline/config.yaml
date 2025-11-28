@@ -1,0 +1,137 @@
+# Hidden Connections - Project 4 (Maximum Features)
+# Unified configuration with CLIP/LLM embedding support
+
+# =============================================================================
+# EMBEDDING MODEL CONFIGURATION
+# =============================================================================
+# Supported model types:
+#   - "sentence-transformers": Fast, lightweight (all-MiniLM-L6-v2, all-mpnet-base-v2)
+#   - "bge": BAAI/bge models - excellent quality (bge-large-en-v1.5, bge-base-en-v1.5)
+#   - "nomic": Nomic AI models (nomic-embed-text-v1.5)
+#   - "clip": OpenAI CLIP for vision+text (clip-vit-base-patch32, clip-vit-large-patch14)
+#   - "openai": OpenAI API embeddings (text-embedding-3-small, text-embedding-3-large)
+#   - "instructor": Instructor embeddings with custom instructions
+
+embedding:
+  # Model type determines which backend to use
+  type: "bge"  # Options: sentence-transformers, bge, nomic, clip, openai, instructor
+
+  # Model name (specific to type)
+  model: "BAAI/bge-large-en-v1.5"
+
+  # Alternative configurations (uncomment to use):
+  #
+  # Fast & lightweight:
+  # type: "sentence-transformers"
+  # model: "all-MiniLM-L6-v2"
+  #
+  # Best open-source quality:
+  # type: "bge"
+  # model: "BAAI/bge-large-en-v1.5"
+  #
+  # Nomic (good quality, permissive license):
+  # type: "nomic"
+  # model: "nomic-ai/nomic-embed-text-v1.5"
+  #
+  # CLIP (multimodal - for text with image concepts):
+  # type: "clip"
+  # model: "openai/clip-vit-large-patch14"
+  #
+  # OpenAI API (requires OPENAI_API_KEY env var):
+  # type: "openai"
+  # model: "text-embedding-3-large"
+  #
+  # Instructor (custom instruction prefix):
+  # type: "instructor"
+  # model: "hkunlp/instructor-large"
+  # instruction: "Represent the personal reflection for clustering:"
+
+  # Optional: instruction prefix for models that support it
+  instruction: "Represent this personal reflection for semantic clustering:"
+
+  # Batch size for encoding (adjust based on GPU memory)
+  batch_size: 32
+
+  # Whether to normalize embeddings (recommended for cosine similarity)
+  normalize: true
+
+  # Device: "cuda", "mps" (Apple Silicon), "cpu", or "auto"
+  device: "auto"
+
+# =============================================================================
+# DIMENSIONALITY REDUCTION (UMAP)
+# =============================================================================
+umap:
+  n_neighbors: 15      # Higher = more global structure, lower = more local
+  min_dist: 0.1        # Higher = more spread out, lower = tighter clusters
+  metric: "cosine"     # Distance metric: cosine, euclidean, manhattan
+  n_components: 2      # Output dimensions (2 for visualization)
+  random_state: 42     # For reproducibility
+
+# =============================================================================
+# CLUSTERING
+# =============================================================================
+clustering:
+  algorithm: "kmeans"  # Options: kmeans, hdbscan, dbscan, agglomerative
+  n_clusters: 5        # For kmeans/agglomerative
+  random_state: 42     # For reproducibility
+
+  # HDBSCAN parameters (if algorithm: hdbscan)
+  min_cluster_size: 5
+  min_samples: 3
+
+# =============================================================================
+# DATA FIELDS
+# =============================================================================
+# Text fields to use for embedding (order matters for display)
+text_fields:
+  - q1_safe_place
+  - q2_stress
+  - q3_understood
+  - q4_free_day
+  - q5_one_word
+
+# Human-readable labels for text fields
+field_labels:
+  q1_safe_place: "Safe Place"
+  q2_stress: "Handling Stress"
+  q3_understood: "Feeling Understood"
+  q4_free_day: "Free Day"
+  q5_one_word: "One Word"
+
+# Categorical fields for metadata display
+categorical_fields:
+  - q6_decision_style
+  - q7_social_energy
+  - q8_region
+
+# Maximum characters per question (truncation limit)
+max_chars_per_question: 500
+
+# =============================================================================
+# FILE PATHS
+# =============================================================================
+paths:
+  input: "data/responses_projective.csv"
+  output: "processed/points.json"
+  web_output: "web/points.json"
+
+# =============================================================================
+# OUTPUT OPTIONS
+# =============================================================================
+output:
+  # Include raw embeddings in output (large file)
+  include_embeddings: false
+
+  # Include UMAP coordinates before normalization
+  include_raw_coords: false
+
+  # Pretty print JSON
+  indent: 2
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  show_progress: true

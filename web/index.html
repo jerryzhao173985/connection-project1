@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0a0a0f">
+    <title>Hidden Connections</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- p5.js for animations -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <!-- Transformers.js for client-side embeddings -->
+    <script type="module" src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1"></script>
+</head>
+<body>
+    <!-- p5.js Background Canvas -->
+    <div id="p5-container"></div>
+
+    <header>
+        <div class="header-left">
+            <h1>Hidden Connections</h1>
+            <span class="subtitle">Projective Semantic Map</span>
+        </div>
+
+        <div class="controls">
+            <button id="btn-cluster" class="mode-btn active" data-mode="cluster" data-group="view">
+                <span class="btn-icon cluster-icon"></span>
+                Clusters
+            </button>
+
+            <div class="control-divider"></div>
+
+            <span class="control-label">Self view:</span>
+            <button id="btn-energy" class="mode-btn" data-mode="energy" data-group="view">
+                <span class="btn-icon energy-icon"></span>
+                Energy
+            </button>
+            <button id="btn-decision" class="mode-btn" data-mode="decision" data-group="view">
+                <span class="btn-icon decision-icon"></span>
+                Decision
+            </button>
+            <button id="btn-region" class="mode-btn" data-mode="region" data-group="view">
+                <span class="btn-icon region-icon"></span>
+                Region
+            </button>
+        </div>
+
+        <div class="header-right">
+            <div class="stats">
+                <span id="point-count">0 points</span>
+                <span class="separator">·</span>
+                <span id="cluster-count">0 clusters</span>
+            </div>
+            <button id="btn-add-self" class="action-btn primary" title="Add yourself to the map">
+                <span class="plus-icon">+</span>
+                Find My Place
+            </button>
+            <button id="btn-neighbors" class="icon-btn" title="Toggle neighbor highlighting (N)">
+                <span class="neighbor-icon">◎</span>
+            </button>
+            <button id="btn-info" class="icon-btn" title="About (?)">
+                <span>?</span>
+            </button>
+        </div>
+    </header>
+
+    <main>
+        <canvas id="canvas"></canvas>
+
+        <!-- Hover Panel -->
+        <div id="hover-panel" class="panel hidden">
+            <div class="panel-header">
+                <span class="nickname" id="panel-nickname">anonymous</span>
+                <span class="panel-id" id="panel-id"></span>
+            </div>
+            <div class="panel-content" id="panel-content">
+            </div>
+            <div class="panel-footer" id="panel-footer">
+            </div>
+        </div>
+
+        <!-- Your Position Indicator -->
+        <div id="your-position" class="your-position hidden">
+            <div class="your-position-badge">YOU</div>
+            <div class="your-position-cluster">Cluster <span id="your-cluster">-</span></div>
+        </div>
+
+        <!-- Legend Panel -->
+        <div id="legend-panel" class="legend">
+            <div class="legend-header">
+                <div class="legend-title" id="legend-title">Model Clusters</div>
+                <div class="legend-subtitle" id="legend-subtitle">ML-detected groupings</div>
+            </div>
+            <div class="legend-items" id="legend-items">
+            </div>
+        </div>
+
+        <!-- Neighbor Info -->
+        <div id="neighbor-info" class="neighbor-info hidden">
+            <span id="neighbor-count">0</span> nearest neighbors shown
+        </div>
+
+        <!-- Self Submission Modal -->
+        <div id="submit-modal" class="modal hidden">
+            <div class="modal-content large">
+                <button class="modal-close" id="submit-modal-close">&times;</button>
+                <h2>Find Your Place on the Map</h2>
+                <p class="modal-intro">Answer these questions to discover where you connect with others in semantic space. Your responses are processed locally - nothing is sent to a server.</p>
+
+                <form id="self-form" class="self-form">
+                    <div class="form-group">
+                        <label for="q1">Describe a place where you feel very safe or "held"</label>
+                        <textarea id="q1" name="q1_safe_place" rows="3" placeholder="A quiet forest clearing, my grandmother's kitchen, wrapped in blankets on the couch..." required></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="q2">Think of a recent time you felt stressed. What happened, and how did you cope?</label>
+                        <textarea id="q2" name="q2_stress" rows="3" placeholder="Describe the situation and how you handled it..." required></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="q3">Describe a moment when you felt understood, seen, or quietly cared for</label>
+                        <textarea id="q3" name="q3_understood" rows="3" placeholder="A friend who noticed without being told, a gesture that meant everything..." required></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="q4">If you had a completely free day with no obligations, how would you spend it?</label>
+                        <textarea id="q4" name="q4_free_day" rows="3" placeholder="Wake up slowly, read in the sun, meet a friend for coffee..." required></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="q5">One word to describe yourself, and why</label>
+                        <textarea id="q5" name="q5_one_word" rows="2" placeholder="Curious - because I always want to understand why..." required></textarea>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label for="q6">How do you typically make decisions?</label>
+                            <select id="q6" name="q6_decision_style" required>
+                                <option value="">Select...</option>
+                                <option value="Mostly rational">Mostly rational</option>
+                                <option value="Mostly emotional">Mostly emotional</option>
+                                <option value="Depends">Depends on the situation</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group half">
+                            <label for="q7">After socializing, do you feel...</label>
+                            <select id="q7" name="q7_social_energy" required>
+                                <option value="">Select...</option>
+                                <option value="Energised">Energised</option>
+                                <option value="Drained">Drained</option>
+                                <option value="Depends">Depends</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label for="q8">Your region</label>
+                            <select id="q8" name="q8_region" required>
+                                <option value="">Select...</option>
+                                <option value="North America">North America</option>
+                                <option value="Europe">Europe</option>
+                                <option value="East Asia">East Asia</option>
+                                <option value="South Asia">South Asia</option>
+                                <option value="Southeast Asia">Southeast Asia</option>
+                                <option value="Oceania">Oceania</option>
+                                <option value="South America">South America</option>
+                                <option value="Africa">Africa</option>
+                                <option value="Middle East">Middle East</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group half">
+                            <label for="nickname">Nickname (optional)</label>
+                            <input type="text" id="nickname" name="nickname" placeholder="anonymous">
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" class="btn secondary" id="cancel-submit">Cancel</button>
+                        <button type="submit" class="btn primary" id="find-place-btn">
+                            <span class="btn-text">Find My Place</span>
+                            <span class="btn-loading hidden">Processing...</span>
+                        </button>
+                    </div>
+                </form>
+
+                <div id="processing-status" class="processing-status hidden">
+                    <div class="processing-spinner"></div>
+                    <div class="processing-text">Analyzing your responses...</div>
+                    <div class="processing-step" id="processing-step">Loading embedding model...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Info Modal -->
+        <div id="info-modal" class="modal hidden">
+            <div class="modal-content">
+                <button class="modal-close" id="modal-close">&times;</button>
+                <h2>Hidden Connections</h2>
+                <p class="tagline">People who have never spoken can end up adjacent in semantic space purely from how they describe their inner worlds.</p>
+
+                <h3>How it works</h3>
+                <ul>
+                    <li><strong>Embeddings</strong>: Text responses are converted to vectors using neural language models</li>
+                    <li><strong>Dimensionality Reduction</strong>: UMAP projects these into 2D space</li>
+                    <li><strong>Clustering</strong>: Similar responses are grouped algorithmically</li>
+                </ul>
+
+                <h3>Find Your Place</h3>
+                <p>Click "Find My Place" to answer the questions yourself. Your responses are processed entirely in your browser using a lightweight ML model - nothing is sent to any server.</p>
+
+                <h3>Viewing Modes</h3>
+                <ul>
+                    <li><strong>Clusters</strong>: ML-detected semantic groupings</li>
+                    <li><strong>Energy</strong>: Self-reported social energy</li>
+                    <li><strong>Decision</strong>: Decision-making style</li>
+                    <li><strong>Region</strong>: Geographic region</li>
+                </ul>
+
+                <h3>Keyboard Shortcuts</h3>
+                <ul class="shortcuts">
+                    <li><kbd>1</kbd> Clusters view</li>
+                    <li><kbd>2</kbd> Energy view</li>
+                    <li><kbd>3</kbd> Decision view</li>
+                    <li><kbd>4</kbd> Region view</li>
+                    <li><kbd>N</kbd> Toggle neighbors</li>
+                    <li><kbd>?</kbd> Toggle help</li>
+                    <li><kbd>Esc</kbd> Close modal</li>
+                    <li><kbd>Space</kbd> Add yourself</li>
+                </ul>
+
+                <p class="modal-footer">Hidden Connections · Maximum Features Edition</p>
+            </div>
+        </div>
+    </main>
+
+    <script src="p5-background.js"></script>
+    <script type="module" src="main.js"></script>
+</body>
+</html>
