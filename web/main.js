@@ -311,70 +311,128 @@ function toggleNeighbors() {
     render();
 }
 
+// =============================================================================
+// MOUSE HANDLERS
+// =============================================================================
+
 function handleMouseMove(e) {
     const rect = canvas.getBoundingClientRect();
-    handlePointerMove(e.clientX - rect.left, e.clientY - rect.top);
+    handlePointerMove(e.clientX - rect.left, e.clientY - rect.top, 25);
 }
 
 function handleMouseLeave() {
     handlePointerLeave();
 }
 
+// =============================================================================
+// TOUCH HANDLERS - Optimized for iOS Safari, Android Chrome, etc.
+// =============================================================================
+
 let lastTouchTime = 0;
 let touchActive = false;
+let touchTimeout = null;
+const TOUCH_THRESHOLD = 50; // Larger hit area for fingers
+const TOUCH_HOLD_TIME = 4000; // How long to keep panel visible after touch
+
+function getTouchPosition(e) {
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0] || e.changedTouches[0];
+    if (!touch) return null;
+    return {
+        x: touch.clientX - rect.left,
+        y: touch.clientY - rect.top
+    };
+}
 
 function handleTouchStart(e) {
-    // Only prevent default if we're interacting with a point
-    const rect = canvas.getBoundingClientRect();
-    const touch = e.touches[0];
-    const mouseX = touch.clientX - rect.left;
-    const mouseY = touch.clientY - rect.top;
+    const pos = getTouchPosition(e);
+    if (!pos) return;
 
-    // Check if touch is near a point
-    let nearPoint = false;
-    for (const point of points) {
-        const [px, py] = dataToScreen(point.x, point.y);
-        const dist = Math.hypot(mouseX - px, mouseY - py);
-        if (dist < 40) { // Larger touch target
-            nearPoint = true;
-            break;
-        }
-    }
-
-    if (nearPoint) {
-        e.preventDefault();
+    // Clear any pending timeout
+    if (touchTimeout) {
+        clearTimeout(touchTimeout);
+        touchTimeout = null;
     }
 
     touchActive = true;
     lastTouchTime = Date.now();
-    handlePointerMove(mouseX, mouseY, 40); // Larger threshold for touch
+
+    // Check if touching near a point and handle
+    const nearPoint = findNearestPoint(pos.x, pos.y, TOUCH_THRESHOLD);
+
+    if (nearPoint) {
+        // Prevent scrolling when interacting with points
+        e.preventDefault();
+        hoveredPoint = nearPoint;
+
+        if (showNeighbors) {
+            updateNeighbors();
+        }
+
+        render();
+        updatePanel();
+    }
 }
 
 function handleTouchMove(e) {
     if (!touchActive) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const touch = e.touches[0];
-    const mouseX = touch.clientX - rect.left;
-    const mouseY = touch.clientY - rect.top;
+    const pos = getTouchPosition(e);
+    if (!pos) return;
 
-    // Only prevent default if we have a hovered point
-    if (hoveredPoint) {
+    lastTouchTime = Date.now();
+
+    const nearPoint = findNearestPoint(pos.x, pos.y, TOUCH_THRESHOLD);
+
+    if (nearPoint) {
         e.preventDefault();
     }
 
-    handlePointerMove(mouseX, mouseY, 40);
+    if (nearPoint !== hoveredPoint) {
+        hoveredPoint = nearPoint;
+
+        if (showNeighbors && hoveredPoint) {
+            updateNeighbors();
+        } else if (!hoveredPoint) {
+            nearestNeighbors = [];
+            document.getElementById('neighbor-info').classList.add('hidden');
+        }
+
+        render();
+        updatePanel();
+    }
 }
 
-function handleTouchEnd() {
+function handleTouchEnd(e) {
     touchActive = false;
-    // On touch devices, keep the panel visible for a moment after touch ends
-    // Clear after 3 seconds of no interaction
-    setTimeout(() => {
-        if (Date.now() - lastTouchTime > 2900) {
-            handlePointerLeave();
+
+    // Keep panel visible for a while after touch ends
+    touchTimeout = setTimeout(() => {
+        if (Date.now() - lastTouchTime >= TOUCH_HOLD_TIME - 100) {
+            hoveredPoint = null;
+            nearestNeighbors = [];
+            document.getElementById('neighbor-info').classList.add('hidden');
+            render();
+            updatePanel();
         }
-    }, 3000);
+    }, TOUCH_HOLD_TIME);
+}
+
+function findNearestPoint(mouseX, mouseY, threshold) {
+    let nearest = null;
+    let minDist = Infinity;
+
+    for (const point of points) {
+        const [px, py] = dataToScreen(point.x, point.y);
+        const dist = Math.hypot(mouseX - px, mouseY - py);
+
+        if (dist < threshold && dist < minDist) {
+            minDist = dist;
+            nearest = point;
+        }
+    }
+
+    return nearest;
 }
 
 function handlePointerMove(mouseX, mouseY, customThreshold) {
