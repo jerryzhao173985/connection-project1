@@ -1,89 +1,53 @@
 /**
- * Hidden Connections - Project 4 (Maximum Features)
- * Interactive Projective Semantic Map
+ * Hidden Connections - Semantic Nebula
  *
- * Features:
- * - Multiple viewing modes (cluster, energy, decision, region)
- * - Smooth color transitions on mode switch
- * - Nearest-neighbor highlighting on hover
- * - Touch support for tablets
- * - Keyboard shortcuts
+ * A cinematic visualization where:
+ * - Each participant is a softly glowing star
+ * - Clusters form colored nebula clouds in the background
+ * - Nearest neighbors are connected by delicate constellation lines
+ * - Everything slowly moves with breathing and pulsing animations
  */
 
 // =============================================================================
-// COLOR PALETTES (from PRD)
+// CONFIGURATION
 // =============================================================================
 
-const CLUSTER_COLORS = [
-    '#4ECDC4', // teal
-    '#FF6B6B', // coral
-    '#C9B1FF', // lavender
-    '#FFE66D', // warm yellow
-    '#95E1D3', // mint
-    '#F38181', // salmon
-    '#74B9FF', // sky blue
-    '#FFEAA7', // light gold
-    '#DFE6E9', // silver
-    '#FD79A8', // pink
-];
+const CONFIG = {
+    // Colors for clusters (nebula palette)
+    colors: [
+        { r: 78, g: 205, b: 196 },   // teal
+        { r: 255, g: 107, b: 107 },  // coral
+        { r: 201, g: 177, b: 255 },  // lavender
+        { r: 255, g: 230, b: 109 },  // warm yellow
+        { r: 149, g: 225, b: 211 },  // mint
+        { r: 243, g: 129, b: 129 },  // salmon
+        { r: 116, g: 185, b: 255 },  // sky blue
+        { r: 255, g: 234, b: 167 },  // light gold
+        { r: 253, g: 121, b: 168 },  // pink
+        { r: 162, g: 155, b: 254 },  // purple
+    ],
 
-const ENERGY_COLORS = {
-    'Energised': '#FFD93D',
-    'Drained': '#6C5CE7',
-    'Depends': '#A8E6CF',
-};
+    // Animation speeds
+    breatheSpeed: 0.0008,      // How fast stars breathe
+    pulseSpeed: 0.002,         // How fast link pulses travel
+    nebulaSpeed: 0.0003,       // How fast nebula clouds flow
 
-const DECISION_COLORS = {
-    'Mostly rational': '#74B9FF',
-    'Mostly emotional': '#FD79A8',
-    'Depends': '#FFEAA7',
-};
+    // Star rendering
+    starBaseRadius: 3,
+    starGlowMultiplier: 4,
 
-const REGION_COLORS = {
-    'North America': '#FF6B6B',
-    'Europe': '#4ECDC4',
-    'East Asia': '#C9B1FF',
-    'South Asia': '#FFE66D',
-    'Southeast Asia': '#95E1D3',
-    'Oceania': '#74B9FF',
-    'South America': '#F38181',
-    'Africa': '#FD79A8',
-    'Middle East': '#FFEAA7',
-};
+    // Connections
+    neighborCount: 4,          // How many neighbors to connect per star
+    maxConnectionDist: 0.25,   // Max distance for connections (in normalized coords)
 
-const MODE_CONFIG = {
-    cluster: {
-        title: 'Model Clusters',
-        subtitle: 'ML-detected semantic groupings',
-        getColor: (p) => CLUSTER_COLORS[p.cluster % CLUSTER_COLORS.length],
-        getKey: (p) => p.cluster,
-        colors: CLUSTER_COLORS,
-        formatLabel: (key) => `Cluster ${key}`,
-    },
-    energy: {
-        title: 'Social Energy',
-        subtitle: 'Self-reported energy from socializing',
-        getColor: (p) => ENERGY_COLORS[getField(p, 'social_energy', 'socialEnergy')] || '#808080',
-        getKey: (p) => getField(p, 'social_energy', 'socialEnergy'),
-        colors: ENERGY_COLORS,
-        formatLabel: (key) => key,
-    },
-    decision: {
-        title: 'Decision Style',
-        subtitle: 'Self-reported decision-making approach',
-        getColor: (p) => DECISION_COLORS[getField(p, 'decision_style', 'decisionStyle')] || '#808080',
-        getKey: (p) => getField(p, 'decision_style', 'decisionStyle'),
-        colors: DECISION_COLORS,
-        formatLabel: (key) => key,
-    },
-    region: {
-        title: 'Geographic Region',
-        subtitle: 'Self-reported location',
-        getColor: (p) => REGION_COLORS[p.region] || '#808080',
-        getKey: (p) => p.region,
-        colors: REGION_COLORS,
-        formatLabel: (key) => key,
-    },
+    // Hover effects
+    hoverBrightness: 2.5,
+    neighborBrightness: 1.8,
+    dimOpacity: 0.15,
+
+    // Touch
+    touchThreshold: 50,
+    touchHoldTime: 4000,
 };
 
 // =============================================================================
@@ -91,98 +55,70 @@ const MODE_CONFIG = {
 // =============================================================================
 
 let points = [];
-let mode = 'cluster';
+let connections = [];  // Pre-computed neighbor connections
 let hoveredPoint = null;
-let nearestNeighbors = [];
-let showNeighbors = false;
-const NEIGHBOR_COUNT = 5;
+let hoveredNeighbors = [];
+let selfPoint = null;
 
-// Animation state for smooth transitions
-let pointColors = new Map(); // Current colors
-let targetColors = new Map(); // Target colors for transition
-let colorTransitionProgress = 1;
-let animationFrame = null;
-
-// Canvas
+// Canvases
 let canvas, ctx;
+let nebulaCanvas, nebulaCtx;
 let dpr = 1;
-let canvasWidth, canvasHeight;
+let width, height;
 const padding = 60;
 
-// =============================================================================
-// UTILITIES
-// =============================================================================
+// Animation
+let time = 0;
+let lastTime = 0;
+let animationFrame = null;
 
-function getField(obj, ...names) {
-    for (const name of names) {
-        if (obj[name] !== undefined) return obj[name];
-    }
-    return undefined;
-}
+// Touch state
+let touchActive = false;
+let touchTimeout = null;
+let lastTouchTime = 0;
 
-function hexToRgb(hex) {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result ? {
-        r: parseInt(result[1], 16),
-        g: parseInt(result[2], 16),
-        b: parseInt(result[3], 16)
-    } : { r: 128, g: 128, b: 128 };
-}
+// Nebula texture
+let nebulaImageData = null;
+let nebulaTime = 0;
 
-function rgbToHex(r, g, b) {
-    return '#' + [r, g, b].map(x => {
-        const hex = Math.round(x).toString(16);
-        return hex.length === 1 ? '0' + hex : hex;
-    }).join('');
-}
-
-function lerpColor(color1, color2, t) {
-    const rgb1 = hexToRgb(color1);
-    const rgb2 = hexToRgb(color2);
-    return rgbToHex(
-        rgb1.r + (rgb2.r - rgb1.r) * t,
-        rgb1.g + (rgb2.g - rgb1.g) * t,
-        rgb1.b + (rgb2.b - rgb1.b) * t
-    );
-}
-
-function distance(p1, p2) {
-    return Math.hypot(p1.x - p2.x, p1.y - p2.y);
-}
-
-function truncate(text, maxLength) {
-    if (!text) return '';
-    if (text.length <= maxLength) return text;
-    return text.substring(0, maxLength).trim() + '...';
-}
+// Self-submission
+let embeddingPipeline = null;
+let isLoadingModel = false;
 
 // =============================================================================
 // INITIALIZATION
 // =============================================================================
 
 async function init() {
-    canvas = document.getElementById('canvas');
-    ctx = canvas.getContext('2d');
-
-    setupCanvas();
+    setupCanvases();
     await loadData();
-    initializeColors();
+    computeConnections();
     setupEventListeners();
-    updateLegend();
-    render();
+    startAnimation();
 }
 
-function setupCanvas() {
+function setupCanvases() {
     dpr = window.devicePixelRatio || 1;
-    canvasWidth = window.innerWidth;
-    canvasHeight = window.innerHeight;
+    width = window.innerWidth;
+    height = window.innerHeight;
 
-    canvas.width = canvasWidth * dpr;
-    canvas.height = canvasHeight * dpr;
-    canvas.style.width = canvasWidth + 'px';
-    canvas.style.height = canvasHeight + 'px';
-
+    // Main canvas for stars
+    canvas = document.getElementById('canvas');
+    ctx = canvas.getContext('2d');
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
     ctx.scale(dpr, dpr);
+
+    // Nebula background canvas
+    nebulaCanvas = document.getElementById('nebula-canvas');
+    nebulaCtx = nebulaCanvas.getContext('2d');
+    nebulaCanvas.width = width * dpr;
+    nebulaCanvas.height = height * dpr;
+    nebulaCanvas.style.width = width + 'px';
+    nebulaCanvas.style.height = height + 'px';
+    nebulaCtx.scale(dpr, dpr);
 }
 
 async function loadData() {
@@ -191,164 +127,132 @@ async function loadData() {
         points = await response.json();
 
         // Update stats
-        document.getElementById('point-count').textContent = `${points.length} points`;
+        document.getElementById('point-count').textContent = points.length;
         const clusters = new Set(points.map(p => p.cluster));
-        document.getElementById('cluster-count').textContent = `${clusters.size} clusters`;
+        document.getElementById('cluster-count').textContent = clusters.size;
 
-        console.log(`Loaded ${points.length} points in ${clusters.size} clusters`);
+        console.log(`Loaded ${points.length} souls in ${clusters.size} clusters`);
     } catch (err) {
-        console.error('Failed to load points.json:', err);
-        document.getElementById('point-count').textContent = 'Error loading';
+        console.error('Failed to load data:', err);
     }
 }
 
-function initializeColors() {
-    const config = MODE_CONFIG[mode];
+function computeConnections() {
+    // For each point, find its nearest neighbors within the same cluster
+    connections = [];
+
     for (const point of points) {
-        const color = config.getColor(point);
-        pointColors.set(point.id, color);
-        targetColors.set(point.id, color);
+        // Get points in same cluster
+        const sameCluster = points.filter(p =>
+            p.id !== point.id && p.cluster === point.cluster
+        );
+
+        // Calculate distances
+        const withDist = sameCluster.map(p => ({
+            from: point,
+            to: p,
+            dist: Math.hypot(point.x - p.x, point.y - p.y)
+        }));
+
+        // Sort by distance and take nearest
+        withDist.sort((a, b) => a.dist - b.dist);
+        const nearest = withDist.slice(0, CONFIG.neighborCount);
+
+        // Add connections (avoid duplicates by only adding if from.id < to.id)
+        for (const conn of nearest) {
+            if (conn.dist < CONFIG.maxConnectionDist) {
+                if (conn.from.id < conn.to.id) {
+                    connections.push(conn);
+                }
+            }
+        }
     }
+
+    console.log(`Computed ${connections.length} constellation links`);
 }
 
 // =============================================================================
-// EVENT HANDLERS
+// EVENT LISTENERS
 // =============================================================================
 
 function setupEventListeners() {
-    // Window resize
-    window.addEventListener('resize', () => {
-        setupCanvas();
-        render();
-    });
+    // Resize
+    window.addEventListener('resize', handleResize);
 
-    // Mouse events
+    // Mouse
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseleave', handleMouseLeave);
 
-    // Touch events - improved for mobile
+    // Touch
     canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
     canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
     canvas.addEventListener('touchend', handleTouchEnd, { passive: true });
     canvas.addEventListener('touchcancel', handleTouchEnd, { passive: true });
 
-    // Detect touch device and adjust behavior
-    if ('ontouchstart' in window) {
-        document.body.classList.add('touch-device');
-    }
-
-    // Mode toggle buttons
-    document.querySelectorAll('.mode-btn[data-group="view"]').forEach(btn => {
-        btn.addEventListener('click', () => setMode(btn.dataset.mode));
-    });
-
-    // Neighbor toggle
-    document.getElementById('btn-neighbors').addEventListener('click', toggleNeighbors);
-
-    // Info modal
-    document.getElementById('btn-info').addEventListener('click', () => {
-        document.getElementById('info-modal').classList.remove('hidden');
-    });
-    document.getElementById('modal-close').addEventListener('click', () => {
-        document.getElementById('info-modal').classList.add('hidden');
-    });
-    document.getElementById('info-modal').addEventListener('click', (e) => {
-        if (e.target.id === 'info-modal') {
-            document.getElementById('info-modal').classList.add('hidden');
-        }
-    });
-
-    // Keyboard shortcuts
+    // Keyboard
     document.addEventListener('keydown', handleKeyboard);
+
+    // Buttons
+    document.getElementById('btn-add-self').addEventListener('click', openSubmitModal);
+    document.getElementById('btn-help').addEventListener('click', openHelpModal);
+    document.getElementById('modal-close').addEventListener('click', closeSubmitModal);
+    document.getElementById('cancel-btn').addEventListener('click', closeSubmitModal);
+    document.getElementById('help-close').addEventListener('click', closeHelpModal);
+
+    // Modal backgrounds
+    document.getElementById('submit-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'submit-modal') closeSubmitModal();
+    });
+    document.getElementById('help-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'help-modal') closeHelpModal();
+    });
+
+    // Form
+    document.getElementById('self-form').addEventListener('submit', handleSelfSubmit);
+}
+
+function handleResize() {
+    setupCanvases();
+    computeConnections();
 }
 
 function handleKeyboard(e) {
-    // Don't handle if typing in an input
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     switch (e.key) {
-        case '1': setMode('cluster'); break;
-        case '2': setMode('energy'); break;
-        case '3': setMode('decision'); break;
-        case '4': setMode('region'); break;
-        case 'n':
-        case 'N':
-            toggleNeighbors();
-            break;
         case '?':
-            document.getElementById('info-modal').classList.toggle('hidden');
+            toggleHelpModal();
+            break;
+        case ' ':
+            e.preventDefault();
+            openSubmitModal();
             break;
         case 'Escape':
-            document.getElementById('info-modal').classList.add('hidden');
+            closeSubmitModal();
+            closeHelpModal();
             break;
     }
-}
-
-function setMode(newMode) {
-    if (mode === newMode) return;
-    mode = newMode;
-
-    // Update button states
-    document.querySelectorAll('.mode-btn[data-group="view"]').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.mode === mode);
-    });
-
-    // Start color transition
-    startColorTransition();
-    updateLegend();
-}
-
-function toggleNeighbors() {
-    showNeighbors = !showNeighbors;
-    document.getElementById('btn-neighbors').classList.toggle('active', showNeighbors);
-
-    if (showNeighbors && hoveredPoint) {
-        updateNeighbors();
-    } else {
-        nearestNeighbors = [];
-        document.getElementById('neighbor-info').classList.add('hidden');
-    }
-    render();
 }
 
 // =============================================================================
-// MOUSE HANDLERS
+// MOUSE/TOUCH HANDLERS
 // =============================================================================
 
 function handleMouseMove(e) {
     const rect = canvas.getBoundingClientRect();
-    handlePointerMove(e.clientX - rect.left, e.clientY - rect.top, 25);
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    findPointAt(x, y, 25);
 }
 
 function handleMouseLeave() {
-    handlePointerLeave();
-}
-
-// =============================================================================
-// TOUCH HANDLERS - Optimized for iOS Safari, Android Chrome, etc.
-// =============================================================================
-
-let lastTouchTime = 0;
-let touchActive = false;
-let touchTimeout = null;
-const TOUCH_THRESHOLD = 50; // Larger hit area for fingers
-const TOUCH_HOLD_TIME = 4000; // How long to keep panel visible after touch
-
-function getTouchPosition(e) {
-    const rect = canvas.getBoundingClientRect();
-    const touch = e.touches[0] || e.changedTouches[0];
-    if (!touch) return null;
-    return {
-        x: touch.clientX - rect.left,
-        y: touch.clientY - rect.top
-    };
+    setHoveredPoint(null);
 }
 
 function handleTouchStart(e) {
-    const pos = getTouchPosition(e);
+    const pos = getTouchPos(e);
     if (!pos) return;
 
-    // Clear any pending timeout
     if (touchTimeout) {
         clearTimeout(touchTimeout);
         touchTimeout = null;
@@ -357,68 +261,46 @@ function handleTouchStart(e) {
     touchActive = true;
     lastTouchTime = Date.now();
 
-    // Check if touching near a point and handle
-    const nearPoint = findNearestPoint(pos.x, pos.y, TOUCH_THRESHOLD);
-
-    if (nearPoint) {
-        // Prevent scrolling when interacting with points
+    const found = findPointAt(pos.x, pos.y, CONFIG.touchThreshold);
+    if (found) {
         e.preventDefault();
-        hoveredPoint = nearPoint;
-
-        if (showNeighbors) {
-            updateNeighbors();
-        }
-
-        render();
-        updatePanel();
     }
 }
 
 function handleTouchMove(e) {
     if (!touchActive) return;
 
-    const pos = getTouchPosition(e);
+    const pos = getTouchPos(e);
     if (!pos) return;
 
     lastTouchTime = Date.now();
-
-    const nearPoint = findNearestPoint(pos.x, pos.y, TOUCH_THRESHOLD);
-
-    if (nearPoint) {
+    const found = findPointAt(pos.x, pos.y, CONFIG.touchThreshold);
+    if (found) {
         e.preventDefault();
     }
-
-    if (nearPoint !== hoveredPoint) {
-        hoveredPoint = nearPoint;
-
-        if (showNeighbors && hoveredPoint) {
-            updateNeighbors();
-        } else if (!hoveredPoint) {
-            nearestNeighbors = [];
-            document.getElementById('neighbor-info').classList.add('hidden');
-        }
-
-        render();
-        updatePanel();
-    }
 }
 
-function handleTouchEnd(e) {
+function handleTouchEnd() {
     touchActive = false;
 
-    // Keep panel visible for a while after touch ends
     touchTimeout = setTimeout(() => {
-        if (Date.now() - lastTouchTime >= TOUCH_HOLD_TIME - 100) {
-            hoveredPoint = null;
-            nearestNeighbors = [];
-            document.getElementById('neighbor-info').classList.add('hidden');
-            render();
-            updatePanel();
+        if (Date.now() - lastTouchTime >= CONFIG.touchHoldTime - 100) {
+            setHoveredPoint(null);
         }
-    }, TOUCH_HOLD_TIME);
+    }, CONFIG.touchHoldTime);
 }
 
-function findNearestPoint(mouseX, mouseY, threshold) {
+function getTouchPos(e) {
+    const touch = e.touches[0] || e.changedTouches[0];
+    if (!touch) return null;
+    const rect = canvas.getBoundingClientRect();
+    return {
+        x: touch.clientX - rect.left,
+        y: touch.clientY - rect.top
+    };
+}
+
+function findPointAt(mouseX, mouseY, threshold) {
     let nearest = null;
     let minDist = Infinity;
 
@@ -432,119 +314,38 @@ function findNearestPoint(mouseX, mouseY, threshold) {
         }
     }
 
+    setHoveredPoint(nearest);
     return nearest;
 }
 
-function handlePointerMove(mouseX, mouseY, customThreshold) {
-    const threshold = customThreshold || 25;
-    let nearest = null;
-    let minDist = Infinity;
+function setHoveredPoint(point) {
+    if (point === hoveredPoint) return;
 
-    for (const point of points) {
-        const [px, py] = dataToScreen(point.x, point.y);
-        const dist = Math.hypot(mouseX - px, mouseY - py);
+    hoveredPoint = point;
 
-        if (dist < threshold && dist < minDist) {
-            minDist = dist;
-            nearest = point;
-        }
-    }
-
-    if (nearest !== hoveredPoint) {
-        hoveredPoint = nearest;
-
-        if (showNeighbors && hoveredPoint) {
-            updateNeighbors();
-        } else if (!hoveredPoint) {
-            nearestNeighbors = [];
-            document.getElementById('neighbor-info').classList.add('hidden');
-        }
-
-        render();
-        updatePanel();
-    }
-}
-
-function handlePointerLeave() {
     if (hoveredPoint) {
-        hoveredPoint = null;
-        nearestNeighbors = [];
-        document.getElementById('neighbor-info').classList.add('hidden');
-        render();
-        updatePanel();
+        // Find neighbors for this point
+        hoveredNeighbors = findNeighbors(hoveredPoint);
+        updatePanel(hoveredPoint);
+        showPanel();
+    } else {
+        hoveredNeighbors = [];
+        hidePanel();
     }
 }
 
-// =============================================================================
-// NEIGHBOR HIGHLIGHTING
-// =============================================================================
+function findNeighbors(point) {
+    const neighbors = new Set();
 
-function updateNeighbors() {
-    if (!hoveredPoint) {
-        nearestNeighbors = [];
-        return;
-    }
-
-    // Calculate distances to all other points
-    const distances = points
-        .filter(p => p.id !== hoveredPoint.id)
-        .map(p => ({
-            point: p,
-            dist: distance(hoveredPoint, p)
-        }))
-        .sort((a, b) => a.dist - b.dist);
-
-    nearestNeighbors = distances.slice(0, NEIGHBOR_COUNT).map(d => d.point);
-
-    // Update UI
-    document.getElementById('neighbor-count').textContent = nearestNeighbors.length;
-    document.getElementById('neighbor-info').classList.remove('hidden');
-}
-
-// =============================================================================
-// COLOR TRANSITIONS
-// =============================================================================
-
-function startColorTransition() {
-    const config = MODE_CONFIG[mode];
-
-    // Set target colors
-    for (const point of points) {
-        targetColors.set(point.id, config.getColor(point));
-    }
-
-    colorTransitionProgress = 0;
-
-    if (animationFrame) {
-        cancelAnimationFrame(animationFrame);
-    }
-
-    animateColorTransition();
-}
-
-function animateColorTransition() {
-    colorTransitionProgress += 0.08; // Transition speed
-
-    if (colorTransitionProgress >= 1) {
-        colorTransitionProgress = 1;
-        // Finalize colors
-        for (const point of points) {
-            pointColors.set(point.id, targetColors.get(point.id));
+    for (const conn of connections) {
+        if (conn.from.id === point.id) {
+            neighbors.add(conn.to);
+        } else if (conn.to.id === point.id) {
+            neighbors.add(conn.from);
         }
-        render();
-        return;
     }
 
-    // Interpolate colors
-    for (const point of points) {
-        const currentColor = pointColors.get(point.id);
-        const targetColor = targetColors.get(point.id);
-        const interpolated = lerpColor(currentColor, targetColor, 0.15);
-        pointColors.set(point.id, interpolated);
-    }
-
-    render();
-    animationFrame = requestAnimationFrame(animateColorTransition);
+    return Array.from(neighbors);
 }
 
 // =============================================================================
@@ -552,8 +353,8 @@ function animateColorTransition() {
 // =============================================================================
 
 function dataToScreen(x, y) {
-    const effectiveWidth = canvasWidth - padding * 2;
-    const effectiveHeight = canvasHeight - padding * 2;
+    const effectiveWidth = width - padding * 2;
+    const effectiveHeight = height - padding * 2;
 
     const screenX = padding + ((x + 1) / 2) * effectiveWidth;
     const screenY = padding + ((1 - y) / 2) * effectiveHeight;
@@ -562,121 +363,314 @@ function dataToScreen(x, y) {
 }
 
 // =============================================================================
-// RENDERING
+// ANIMATION LOOP
 // =============================================================================
 
-function render() {
-    // Clear with gradient background
-    const gradient = ctx.createRadialGradient(
-        canvasWidth / 2, canvasHeight / 2, 0,
-        canvasWidth / 2, canvasHeight / 2, Math.max(canvasWidth, canvasHeight) * 0.6
-    );
-    gradient.addColorStop(0, '#0e0e14');
-    gradient.addColorStop(1, '#0a0a0f');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+function startAnimation() {
+    lastTime = performance.now();
+    animate();
+}
 
-    // Sort points: neighbors and hovered on top
-    const sortedPoints = [...points].sort((a, b) => {
-        const aIsNeighbor = nearestNeighbors.includes(a);
-        const bIsNeighbor = nearestNeighbors.includes(b);
+function animate(currentTime = 0) {
+    const deltaTime = currentTime - lastTime;
+    lastTime = currentTime;
+    time += deltaTime;
+    nebulaTime += deltaTime;
+
+    // Render nebula background (less frequently for performance)
+    if (Math.floor(nebulaTime / 50) !== Math.floor((nebulaTime - deltaTime) / 50)) {
+        renderNebula();
+    }
+
+    // Render stars and connections
+    renderMain();
+
+    animationFrame = requestAnimationFrame(animate);
+}
+
+// =============================================================================
+// NEBULA RENDERING
+// =============================================================================
+
+function renderNebula() {
+    // Clear
+    nebulaCtx.fillStyle = '#050508';
+    nebulaCtx.fillRect(0, 0, width, height);
+
+    // Group points by cluster
+    const clusters = new Map();
+    for (const point of points) {
+        if (!clusters.has(point.cluster)) {
+            clusters.set(point.cluster, []);
+        }
+        clusters.get(point.cluster).push(point);
+    }
+
+    // Draw nebula cloud for each cluster
+    for (const [clusterId, clusterPoints] of clusters) {
+        if (clusterPoints.length < 2) continue;
+
+        const color = CONFIG.colors[clusterId % CONFIG.colors.length];
+
+        // Calculate cluster center and spread
+        let cx = 0, cy = 0;
+        for (const p of clusterPoints) {
+            cx += p.x;
+            cy += p.y;
+        }
+        cx /= clusterPoints.length;
+        cy /= clusterPoints.length;
+
+        // Calculate spread
+        let maxDist = 0;
+        for (const p of clusterPoints) {
+            const d = Math.hypot(p.x - cx, p.y - cy);
+            if (d > maxDist) maxDist = d;
+        }
+
+        const [screenCx, screenCy] = dataToScreen(cx, cy);
+        const screenRadius = maxDist * Math.min(width, height) * 0.4;
+
+        // Add noise-based offset for flowing effect
+        const noiseOffset = simpleNoise(clusterId * 100, nebulaTime * CONFIG.nebulaSpeed);
+        const offsetX = noiseOffset * 20;
+        const offsetY = simpleNoise(clusterId * 200, nebulaTime * CONFIG.nebulaSpeed) * 20;
+
+        // Draw soft gradient cloud
+        const gradient = nebulaCtx.createRadialGradient(
+            screenCx + offsetX, screenCy + offsetY, 0,
+            screenCx + offsetX, screenCy + offsetY, screenRadius + 50
+        );
+
+        const alpha = 0.08 + 0.02 * Math.sin(nebulaTime * 0.0005 + clusterId);
+        gradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha * 1.5})`);
+        gradient.addColorStop(0.5, `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`);
+        gradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
+
+        nebulaCtx.fillStyle = gradient;
+        nebulaCtx.beginPath();
+        nebulaCtx.arc(screenCx + offsetX, screenCy + offsetY, screenRadius + 50, 0, Math.PI * 2);
+        nebulaCtx.fill();
+
+        // Draw secondary smaller clouds at some cluster points
+        for (let i = 0; i < Math.min(3, clusterPoints.length); i++) {
+            const p = clusterPoints[i];
+            const [px, py] = dataToScreen(p.x, p.y);
+
+            const smallGradient = nebulaCtx.createRadialGradient(px, py, 0, px, py, 40);
+            smallGradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha * 0.5})`);
+            smallGradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
+
+            nebulaCtx.fillStyle = smallGradient;
+            nebulaCtx.beginPath();
+            nebulaCtx.arc(px, py, 40, 0, Math.PI * 2);
+            nebulaCtx.fill();
+        }
+    }
+}
+
+// Simple noise function for nebula movement
+function simpleNoise(seed, t) {
+    return Math.sin(seed + t) * Math.cos(seed * 0.7 + t * 1.3) +
+           Math.sin(seed * 1.5 + t * 0.8) * 0.5;
+}
+
+// =============================================================================
+// MAIN RENDERING (Stars + Connections)
+// =============================================================================
+
+function renderMain() {
+    // Clear with transparent
+    ctx.clearRect(0, 0, width, height);
+
+    // Draw connections first (behind stars)
+    renderConnections();
+
+    // Draw stars
+    renderStars();
+
+    // Update your marker position if exists
+    if (selfPoint) {
+        updateYourMarker();
+    }
+}
+
+function renderConnections() {
+    for (const conn of connections) {
+        const [x1, y1] = dataToScreen(conn.from.x, conn.from.y);
+        const [x2, y2] = dataToScreen(conn.to.x, conn.to.y);
+
+        // Check if this connection involves hovered point
+        const isActive = hoveredPoint && (
+            conn.from.id === hoveredPoint.id ||
+            conn.to.id === hoveredPoint.id
+        );
+
+        // Check if both ends are neighbors of hovered
+        const bothNeighbors = hoveredPoint &&
+            hoveredNeighbors.some(n => n.id === conn.from.id) &&
+            hoveredNeighbors.some(n => n.id === conn.to.id);
+
+        // Get cluster color
+        const color = CONFIG.colors[conn.from.cluster % CONFIG.colors.length];
+
+        // Calculate pulse effect
+        const pulsePhase = (time * CONFIG.pulseSpeed + conn.from.id * 0.1) % 1;
+
+        // Line properties based on state
+        let opacity, lineWidth;
+
+        if (isActive) {
+            // This connection goes to/from hovered star
+            opacity = 0.6 + 0.3 * Math.sin(pulsePhase * Math.PI * 2);
+            lineWidth = 1.5 + 0.5 * Math.sin(pulsePhase * Math.PI * 2);
+        } else if (bothNeighbors) {
+            // Between two neighbors
+            opacity = 0.25;
+            lineWidth = 0.8;
+        } else if (hoveredPoint) {
+            // Something is hovered but not this connection
+            opacity = 0.03;
+            lineWidth = 0.5;
+        } else {
+            // Default: subtle pulsing
+            opacity = 0.08 + 0.04 * Math.sin(pulsePhase * Math.PI * 2);
+            lineWidth = 0.5;
+        }
+
+        // Draw line
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.strokeStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${opacity})`;
+        ctx.lineWidth = lineWidth;
+        ctx.stroke();
+
+        // Draw pulse traveling along the line for active connections
+        if (isActive) {
+            const pulseX = x1 + (x2 - x1) * pulsePhase;
+            const pulseY = y1 + (y2 - y1) * pulsePhase;
+
+            ctx.beginPath();
+            ctx.arc(pulseX, pulseY, 2, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, 0.8)`;
+            ctx.fill();
+        }
+    }
+}
+
+function renderStars() {
+    // Sort: hovered on top, then neighbors, then rest
+    const sorted = [...points].sort((a, b) => {
         const aIsHovered = a === hoveredPoint;
         const bIsHovered = b === hoveredPoint;
+        const aIsNeighbor = hoveredNeighbors.includes(a);
+        const bIsNeighbor = hoveredNeighbors.includes(b);
+        const aIsSelf = a === selfPoint;
+        const bIsSelf = b === selfPoint;
 
         if (aIsHovered) return 1;
         if (bIsHovered) return -1;
+        if (aIsSelf) return 1;
+        if (bIsSelf) return -1;
         if (aIsNeighbor && !bIsNeighbor) return 1;
         if (!aIsNeighbor && bIsNeighbor) return -1;
         return 0;
     });
 
-    // Draw connection lines to neighbors
-    if (showNeighbors && hoveredPoint && nearestNeighbors.length > 0) {
-        const [hx, hy] = dataToScreen(hoveredPoint.x, hoveredPoint.y);
-
-        for (let i = 0; i < nearestNeighbors.length; i++) {
-            const neighbor = nearestNeighbors[i];
-            const [nx, ny] = dataToScreen(neighbor.x, neighbor.y);
-
-            // Gradient line
-            const lineGradient = ctx.createLinearGradient(hx, hy, nx, ny);
-            const opacity = 0.3 - (i * 0.05);
-            lineGradient.addColorStop(0, `rgba(78, 205, 196, ${opacity})`);
-            lineGradient.addColorStop(1, `rgba(78, 205, 196, ${opacity * 0.3})`);
-
-            ctx.beginPath();
-            ctx.moveTo(hx, hy);
-            ctx.lineTo(nx, ny);
-            ctx.strokeStyle = lineGradient;
-            ctx.lineWidth = 1;
-            ctx.stroke();
-        }
-    }
-
-    // Draw points
-    for (const point of sortedPoints) {
-        const isHovered = point === hoveredPoint;
-        const isNeighbor = nearestNeighbors.includes(point);
-        drawPoint(point, isHovered, isNeighbor);
+    for (const point of sorted) {
+        drawStar(point);
     }
 }
 
-function drawPoint(point, isHovered, isNeighbor) {
+function drawStar(point) {
     const [x, y] = dataToScreen(point.x, point.y);
-    const color = pointColors.get(point.id) || MODE_CONFIG[mode].getColor(point);
+    const color = CONFIG.colors[point.cluster % CONFIG.colors.length];
 
-    // Determine size
-    let baseRadius = 4;
-    if (isHovered) baseRadius = 7;
-    else if (isNeighbor) baseRadius = 5;
+    // Determine state
+    const isHovered = point === hoveredPoint;
+    const isNeighbor = hoveredNeighbors.includes(point);
+    const isSelf = point === selfPoint;
 
-    // Determine opacity
+    // Breathing animation
+    const breathe = Math.sin(time * CONFIG.breatheSpeed + point.x * 10 + point.y * 10);
+
+    // Calculate radius with breathing
+    let baseRadius = CONFIG.starBaseRadius;
+    if (isSelf) baseRadius = 5;
+    else if (isHovered) baseRadius = 6;
+    else if (isNeighbor) baseRadius = 4;
+
+    const radius = baseRadius + breathe * 0.5;
+
+    // Calculate brightness
+    let brightness = 1;
     let opacity = 1;
-    if (showNeighbors && hoveredPoint && !isHovered && !isNeighbor) {
-        opacity = 0.25;
+
+    if (isHovered) {
+        brightness = CONFIG.hoverBrightness;
+    } else if (isNeighbor) {
+        brightness = CONFIG.neighborBrightness;
+    } else if (hoveredPoint) {
+        opacity = CONFIG.dimOpacity;
     }
 
-    // Draw outer glow
-    const glowRadius = baseRadius * (isHovered ? 4 : isNeighbor ? 3.5 : 3);
-    const glowOpacity = isHovered ? 0.4 : isNeighbor ? 0.35 : 0.2;
+    // Glow radius
+    const glowRadius = radius * CONFIG.starGlowMultiplier * brightness;
 
-    const gradient = ctx.createRadialGradient(x, y, 0, x, y, glowRadius);
-    gradient.addColorStop(0, color + Math.round(glowOpacity * opacity * 255).toString(16).padStart(2, '0'));
-    gradient.addColorStop(1, color + '00');
+    // Draw outer glow
+    const glowGradient = ctx.createRadialGradient(x, y, 0, x, y, glowRadius);
+    const glowAlpha = 0.3 * brightness * opacity;
+    glowGradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, ${glowAlpha})`);
+    glowGradient.addColorStop(0.4, `rgba(${color.r}, ${color.g}, ${color.b}, ${glowAlpha * 0.3})`);
+    glowGradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
 
     ctx.beginPath();
     ctx.arc(x, y, glowRadius, 0, Math.PI * 2);
-    ctx.fillStyle = gradient;
+    ctx.fillStyle = glowGradient;
     ctx.fill();
 
-    // Draw main point
-    ctx.globalAlpha = opacity;
+    // Draw core
     ctx.beginPath();
-    ctx.arc(x, y, baseRadius, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.globalAlpha = 1;
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
 
-    // Draw rings for hovered/neighbor
-    if (isHovered) {
-        // Inner ring
+    // Core gradient for 3D effect
+    const coreGradient = ctx.createRadialGradient(
+        x - radius * 0.3, y - radius * 0.3, 0,
+        x, y, radius
+    );
+
+    const coreAlpha = opacity;
+    coreGradient.addColorStop(0, `rgba(255, 255, 255, ${coreAlpha})`);
+    coreGradient.addColorStop(0.3, `rgba(${Math.min(255, color.r + 50)}, ${Math.min(255, color.g + 50)}, ${Math.min(255, color.b + 50)}, ${coreAlpha})`);
+    coreGradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, ${coreAlpha})`);
+
+    ctx.fillStyle = coreGradient;
+    ctx.fill();
+
+    // Highlight ring for hovered/self
+    if (isHovered || isSelf) {
         ctx.beginPath();
-        ctx.arc(x, y, baseRadius + 4, 0, Math.PI * 2);
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
+        ctx.arc(x, y, radius + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.8 * opacity})`;
+        ctx.lineWidth = isSelf ? 2 : 1.5;
         ctx.stroke();
 
-        // Outer pulse ring
+        // Outer pulsing ring
+        const pulseRadius = radius + 8 + breathe * 2;
         ctx.beginPath();
-        ctx.arc(x, y, baseRadius + 9, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+        ctx.arc(x, y, pulseRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.3 * opacity})`;
         ctx.lineWidth = 1;
         ctx.stroke();
-    } else if (isNeighbor) {
+    }
+
+    // Neighbor highlight ring
+    if (isNeighbor && !isHovered) {
         ctx.beginPath();
-        ctx.arc(x, y, baseRadius + 3, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(78, 205, 196, 0.6)';
-        ctx.lineWidth = 1.5;
+        ctx.arc(x, y, radius + 3, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${color.r}, ${color.g}, ${color.b}, 0.5)`;
+        ctx.lineWidth = 1;
         ctx.stroke();
     }
 }
@@ -685,136 +679,82 @@ function drawPoint(point, isHovered, isNeighbor) {
 // PANEL UPDATES
 // =============================================================================
 
-function updatePanel() {
-    const panel = document.getElementById('hover-panel');
+function showPanel() {
+    document.getElementById('info-panel').classList.remove('hidden');
+}
 
-    if (!hoveredPoint) {
-        panel.classList.add('hidden');
-        return;
-    }
+function hidePanel() {
+    document.getElementById('info-panel').classList.add('hidden');
+}
 
-    panel.classList.remove('hidden');
+function updatePanel(point) {
+    // Nickname
+    document.getElementById('panel-nickname').textContent = point.nickname || 'anonymous';
 
-    // Header
-    document.getElementById('panel-nickname').textContent = hoveredPoint.nickname || 'anonymous';
-    document.getElementById('panel-id').textContent = hoveredPoint.id;
+    // Cluster badge with color
+    const color = CONFIG.colors[point.cluster % CONFIG.colors.length];
+    const clusterEl = document.getElementById('panel-cluster');
+    clusterEl.textContent = `Cluster ${point.cluster}`;
+    clusterEl.style.background = `rgba(${color.r}, ${color.g}, ${color.b}, 0.3)`;
+    clusterEl.style.borderColor = `rgba(${color.r}, ${color.g}, ${color.b}, 0.5)`;
 
     // Questions
-    const contentEl = document.getElementById('panel-content');
-    const questions = parseQuestions(hoveredPoint.text);
+    const bodyEl = document.getElementById('panel-body');
+    const questions = parseQuestions(point.text);
 
-    contentEl.innerHTML = questions.map(q => `
+    bodyEl.innerHTML = questions.map(q => `
         <div class="question-block">
             <div class="question-label">${q.label}</div>
-            <div class="question-text">${truncate(q.text, 200)}</div>
+            <div class="question-text">${q.text}</div>
         </div>
     `).join('');
 
-    // Footer metadata
-    const footerEl = document.getElementById('panel-footer');
-    const clusterColor = CLUSTER_COLORS[hoveredPoint.cluster % CLUSTER_COLORS.length];
-    const decisionStyle = getField(hoveredPoint, 'decision_style', 'decisionStyle') || 'N/A';
-    const socialEnergy = getField(hoveredPoint, 'social_energy', 'socialEnergy') || 'N/A';
-    const region = hoveredPoint.region || 'N/A';
+    // Meta info
+    const metaEl = document.getElementById('panel-meta');
+    const decisionStyle = point.decision_style || point.decisionStyle || '';
+    const socialEnergy = point.social_energy || point.socialEnergy || '';
+    const region = point.region || '';
 
-    footerEl.innerHTML = `
-        <div class="meta-row">
-            <span class="meta-label">Model cluster</span>
-            <span class="meta-value">
-                <span class="cluster-badge" style="background: ${clusterColor}; color: ${clusterColor}"></span>
-                ${hoveredPoint.cluster}
-            </span>
-        </div>
-        <div class="meta-row">
-            <span class="meta-label">Decision style</span>
-            <span class="meta-value">${decisionStyle}</span>
-        </div>
-        <div class="meta-row">
-            <span class="meta-label">Social energy</span>
-            <span class="meta-value">${socialEnergy}</span>
-        </div>
-        <div class="meta-row">
-            <span class="meta-label">Region</span>
-            <span class="meta-value">${region}</span>
-        </div>
-    `;
+    const metaItems = [];
+    if (decisionStyle) metaItems.push(`<span class="meta-item">Decision: <span>${decisionStyle}</span></span>`);
+    if (socialEnergy) metaItems.push(`<span class="meta-item">Energy: <span>${socialEnergy}</span></span>`);
+    if (region) metaItems.push(`<span class="meta-item">Region: <span>${region}</span></span>`);
+
+    metaEl.innerHTML = metaItems.join('');
 }
-
-function updateLegend() {
-    const config = MODE_CONFIG[mode];
-    const titleEl = document.getElementById('legend-title');
-    const subtitleEl = document.getElementById('legend-subtitle');
-    const itemsEl = document.getElementById('legend-items');
-
-    titleEl.textContent = config.title;
-    subtitleEl.textContent = config.subtitle;
-
-    // Collect unique values and counts
-    const counts = new Map();
-    for (const point of points) {
-        const key = config.getKey(point);
-        counts.set(key, (counts.get(key) || 0) + 1);
-    }
-
-    // Sort by count (descending) or by key for clusters
-    let sortedKeys = [...counts.keys()];
-    if (mode === 'cluster') {
-        sortedKeys.sort((a, b) => a - b);
-    } else {
-        sortedKeys.sort((a, b) => counts.get(b) - counts.get(a));
-    }
-
-    itemsEl.innerHTML = sortedKeys.map(key => {
-        const color = mode === 'cluster'
-            ? CLUSTER_COLORS[key % CLUSTER_COLORS.length]
-            : config.colors[key] || '#808080';
-        const count = counts.get(key);
-        const label = config.formatLabel(key);
-
-        return `
-            <div class="legend-item">
-                <span class="legend-dot" style="background: ${color}; color: ${color}"></span>
-                <span>${label}</span>
-                <span class="legend-count">${count}</span>
-            </div>
-        `;
-    }).join('');
-}
-
-// =============================================================================
-// QUESTION PARSING
-// =============================================================================
 
 function parseQuestions(text) {
     const questions = [];
-    const labelPatterns = [
-        { pattern: /Q1 \(([^)]+)\):/, fallback: 'Safe Place' },
-        { pattern: /Q2 \(([^)]+)\):/, fallback: 'Handling Stress' },
-        { pattern: /Q3 \(([^)]+)\):/, fallback: 'Feeling Understood' },
-        { pattern: /Q4 \(([^)]+)\):/, fallback: 'Free Day' },
-        { pattern: /Q5 \(([^)]+)\):/, fallback: 'One Word' },
+    const patterns = [
+        { regex: /Q1 \(([^)]+)\):\s*/, fallback: 'Safe Place' },
+        { regex: /Q2 \(([^)]+)\):\s*/, fallback: 'Handling Stress' },
+        { regex: /Q3 \(([^)]+)\):\s*/, fallback: 'Feeling Understood' },
+        { regex: /Q4 \(([^)]+)\):\s*/, fallback: 'Free Day' },
+        { regex: /Q5 \(([^)]+)\):\s*/, fallback: 'One Word' },
     ];
 
     const lines = text.split('\n');
 
     for (const line of lines) {
-        for (const { pattern, fallback } of labelPatterns) {
-            const match = line.match(pattern);
+        for (const { regex, fallback } of patterns) {
+            const match = line.match(regex);
             if (match) {
                 const label = match[1] || fallback;
-                const textContent = line.replace(pattern, '').trim();
-                questions.push({ label, text: textContent });
+                const content = line.replace(regex, '').trim();
+                if (content) {
+                    questions.push({ label, text: content });
+                }
                 break;
             }
         }
     }
 
-    // Fallback if no patterns matched
+    // Fallback
     if (questions.length === 0) {
-        const fallbackLabels = ['Response 1', 'Response 2', 'Response 3', 'Response 4', 'Response 5'];
-        text.split('\n').filter(l => l.trim()).forEach((part, i) => {
+        const parts = text.split('\n').filter(l => l.trim());
+        parts.forEach((part, i) => {
             questions.push({
-                label: fallbackLabels[i] || `Response ${i + 1}`,
+                label: `Response ${i + 1}`,
                 text: part.trim()
             });
         });
@@ -824,48 +764,44 @@ function parseQuestions(text) {
 }
 
 // =============================================================================
-// SELF-SUBMISSION FEATURE
+// YOUR MARKER
 // =============================================================================
 
-let selfPoint = null;
-let embeddingPipeline = null;
-let isLoadingModel = false;
+function updateYourMarker() {
+    const marker = document.getElementById('your-marker');
+    const [x, y] = dataToScreen(selfPoint.x, selfPoint.y);
 
-function setupSelfSubmission() {
-    const btnAddSelf = document.getElementById('btn-add-self');
-    const submitModal = document.getElementById('submit-modal');
-    const submitModalClose = document.getElementById('submit-modal-close');
-    const cancelSubmit = document.getElementById('cancel-submit');
-    const selfForm = document.getElementById('self-form');
-
-    btnAddSelf.addEventListener('click', () => {
-        submitModal.classList.remove('hidden');
-    });
-
-    submitModalClose.addEventListener('click', () => {
-        submitModal.classList.add('hidden');
-    });
-
-    cancelSubmit.addEventListener('click', () => {
-        submitModal.classList.add('hidden');
-    });
-
-    submitModal.addEventListener('click', (e) => {
-        if (e.target === submitModal) {
-            submitModal.classList.add('hidden');
-        }
-    });
-
-    selfForm.addEventListener('submit', handleSelfSubmit);
-
-    // Space key to open submission
-    document.addEventListener('keydown', (e) => {
-        if (e.code === 'Space' && !e.target.matches('input, textarea, select')) {
-            e.preventDefault();
-            submitModal.classList.remove('hidden');
-        }
-    });
+    marker.style.left = `${x}px`;
+    marker.style.top = `${y - 20}px`;
 }
+
+// =============================================================================
+// MODALS
+// =============================================================================
+
+function openSubmitModal() {
+    document.getElementById('submit-modal').classList.remove('hidden');
+}
+
+function closeSubmitModal() {
+    document.getElementById('submit-modal').classList.add('hidden');
+}
+
+function openHelpModal() {
+    document.getElementById('help-modal').classList.remove('hidden');
+}
+
+function closeHelpModal() {
+    document.getElementById('help-modal').classList.add('hidden');
+}
+
+function toggleHelpModal() {
+    document.getElementById('help-modal').classList.toggle('hidden');
+}
+
+// =============================================================================
+// SELF-SUBMISSION
+// =============================================================================
 
 async function handleSelfSubmit(e) {
     e.preventDefault();
@@ -873,119 +809,100 @@ async function handleSelfSubmit(e) {
     const form = e.target;
     const formData = new FormData(form);
 
-    // Show processing state
-    const processingStatus = document.getElementById('processing-status');
-    const findPlaceBtn = document.getElementById('find-place-btn');
-    const btnText = findPlaceBtn.querySelector('.btn-text');
-    const btnLoading = findPlaceBtn.querySelector('.btn-loading');
+    // Show processing
+    const submitBtn = document.getElementById('submit-btn');
+    const btnText = submitBtn.querySelector('.btn-text');
+    const btnLoading = submitBtn.querySelector('.btn-loading');
+    const statusEl = document.getElementById('processing-status');
+    const statusText = document.getElementById('status-text');
 
     btnText.classList.add('hidden');
     btnLoading.classList.remove('hidden');
-    findPlaceBtn.disabled = true;
-    processingStatus.classList.remove('hidden');
+    submitBtn.disabled = true;
+    statusEl.classList.remove('hidden');
+    form.style.display = 'none';
 
     try {
-        // Build user text from responses
-        const userText = buildUserText(formData);
-        const metadata = extractMetadata(formData);
+        // Build text
+        const userText = [
+            `Q1 (safe place): ${formData.get('q1_safe_place')}`,
+            `Q2 (stress): ${formData.get('q2_stress')}`,
+            `Q3 (understood): ${formData.get('q3_understood')}`,
+            `Q4 (free day): ${formData.get('q4_free_day')}`,
+            `Q5 (one word): ${formData.get('q5_one_word')}`,
+        ].join('\n');
 
-        updateProcessingStep('Loading embedding model...');
-        await loadEmbeddingModel();
+        // Load model
+        statusText.textContent = 'Loading embedding model...';
+        await loadEmbeddingModel(progress => {
+            if (progress.status === 'downloading') {
+                const pct = Math.round((progress.loaded / progress.total) * 100);
+                statusText.textContent = `Downloading model... ${pct}%`;
+            }
+        });
 
-        updateProcessingStep('Generating your embedding...');
+        // Generate embedding
+        statusText.textContent = 'Generating your embedding...';
         const userEmbedding = await generateEmbedding(userText);
 
-        updateProcessingStep('Finding your position...');
-        const position = await findPosition(userEmbedding, userText);
+        // Find position
+        statusText.textContent = 'Finding your position...';
+        const position = await findPosition(userEmbedding);
 
-        updateProcessingStep('Determining your cluster...');
+        // Find cluster
+        statusText.textContent = 'Determining your cluster...';
         const cluster = findNearestCluster(position);
 
-        // Create the self point
+        // Create self point
         selfPoint = {
             id: 'self',
             text: userText,
             x: position.x,
             y: position.y,
             cluster: cluster,
-            decision_style: metadata.decision_style,
-            social_energy: metadata.social_energy,
-            region: metadata.region,
-            nickname: metadata.nickname || 'You',
+            nickname: formData.get('nickname') || 'You',
             isSelf: true
         };
 
-        // Add to points array
+        // Add to points
         points.push(selfPoint);
 
-        // Initialize colors for the new point
-        const config = MODE_CONFIG[mode];
-        const color = config.getColor(selfPoint);
-        pointColors.set(selfPoint.id, color);
-        targetColors.set(selfPoint.id, color);
+        // Recompute connections
+        computeConnections();
 
         // Update stats
-        document.getElementById('point-count').textContent = `${points.length} points`;
+        document.getElementById('point-count').textContent = points.length;
 
-        // Close modal and render
-        document.getElementById('submit-modal').classList.add('hidden');
+        // Show marker
+        document.getElementById('your-marker').classList.remove('hidden');
+        updateYourMarker();
 
-        // Show position indicator
-        showYourPosition(cluster);
+        // Close modal
+        closeSubmitModal();
 
-        // Re-render
-        render();
-
-        // Update legend
-        updateLegend();
-
-        // Highlight the self point briefly
+        // Highlight self
         setTimeout(() => {
-            hoveredPoint = selfPoint;
-            if (showNeighbors) updateNeighbors();
-            render();
-            updatePanel();
+            setHoveredPoint(selfPoint);
         }, 300);
 
     } catch (err) {
         console.error('Self-submission error:', err);
-        updateProcessingStep(`Error: ${err.message}`);
+        statusText.textContent = `Error: ${err.message}`;
     } finally {
-        btnText.classList.remove('hidden');
-        btnLoading.classList.add('hidden');
-        findPlaceBtn.disabled = false;
-        setTimeout(() => processingStatus.classList.add('hidden'), 2000);
+        // Reset form UI after delay
+        setTimeout(() => {
+            btnText.classList.remove('hidden');
+            btnLoading.classList.add('hidden');
+            submitBtn.disabled = false;
+            statusEl.classList.add('hidden');
+            form.style.display = '';
+        }, 2000);
     }
 }
 
-function buildUserText(formData) {
-    const parts = [
-        `Q1 (safe place): ${formData.get('q1_safe_place')}`,
-        `Q2 (stress): ${formData.get('q2_stress')}`,
-        `Q3 (understood): ${formData.get('q3_understood')}`,
-        `Q4 (free day): ${formData.get('q4_free_day')}`,
-        `Q5 (one word): ${formData.get('q5_one_word')}`,
-    ];
-    return parts.join('\n');
-}
-
-function extractMetadata(formData) {
-    return {
-        decision_style: formData.get('q6_decision_style'),
-        social_energy: formData.get('q7_social_energy'),
-        region: formData.get('q8_region'),
-        nickname: formData.get('nickname')
-    };
-}
-
-function updateProcessingStep(text) {
-    document.getElementById('processing-step').textContent = text;
-}
-
-async function loadEmbeddingModel() {
+async function loadEmbeddingModel(progressCallback) {
     if (embeddingPipeline) return;
     if (isLoadingModel) {
-        // Wait for existing load
         while (isLoadingModel) {
             await new Promise(r => setTimeout(r, 100));
         }
@@ -994,18 +911,10 @@ async function loadEmbeddingModel() {
 
     isLoadingModel = true;
     try {
-        // Import Transformers.js
         const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1');
-
-        // Use a small, fast model for browser
         embeddingPipeline = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
             quantized: true,
-            progress_callback: (progress) => {
-                if (progress.status === 'downloading') {
-                    const pct = Math.round((progress.loaded / progress.total) * 100);
-                    updateProcessingStep(`Downloading model... ${pct}%`);
-                }
-            }
+            progress_callback: progressCallback
         });
     } finally {
         isLoadingModel = false;
@@ -1017,45 +926,35 @@ async function generateEmbedding(text) {
     return Array.from(output.data);
 }
 
-async function findPosition(userEmbedding, userText) {
-    // Strategy: Use text similarity to find position
-    // Since we don't have original embeddings stored, we'll use a simple approach:
-    // Generate embeddings for a sample of existing points and interpolate
-
-    // For performance, sample points if there are many
+async function findPosition(userEmbedding) {
+    // Sample points for comparison
     const sampleSize = Math.min(points.length, 30);
-    const sampledPoints = points.length <= sampleSize
-        ? points
-        : sampleRandomPoints(points, sampleSize);
+    const sampled = points.length <= sampleSize ? points :
+        [...points].sort(() => Math.random() - 0.5).slice(0, sampleSize);
 
-    // Generate embeddings for sampled points
-    const pointEmbeddings = [];
-    for (let i = 0; i < sampledPoints.length; i++) {
-        const point = sampledPoints[i];
-        updateProcessingStep(`Comparing with point ${i + 1}/${sampledPoints.length}...`);
-        const embedding = await generateEmbedding(point.text);
-        pointEmbeddings.push({ point, embedding });
+    // Generate embeddings for samples
+    const embeddings = [];
+    for (const point of sampled) {
+        const emb = await generateEmbedding(point.text);
+        embeddings.push({ point, embedding: emb });
     }
 
-    // Calculate cosine similarities
-    const similarities = pointEmbeddings.map(({ point, embedding }) => ({
+    // Calculate similarities
+    const similarities = embeddings.map(({ point, embedding }) => ({
         point,
-        similarity: cosineSimilarity(userEmbedding, embedding)
+        sim: cosineSimilarity(userEmbedding, embedding)
     }));
 
-    // Sort by similarity
-    similarities.sort((a, b) => b.similarity - a.similarity);
+    similarities.sort((a, b) => b.sim - a.sim);
 
-    // Use weighted average of top k neighbors
+    // Weighted average of top k
     const k = Math.min(5, similarities.length);
     let totalWeight = 0;
-    let x = 0;
-    let y = 0;
+    let x = 0, y = 0;
 
     for (let i = 0; i < k; i++) {
-        const { point, similarity } = similarities[i];
-        // Convert similarity to weight (higher similarity = more weight)
-        const weight = Math.pow(Math.max(0, similarity), 2);
+        const { point, sim } = similarities[i];
+        const weight = Math.pow(Math.max(0, sim), 2);
         x += point.x * weight;
         y += point.y * weight;
         totalWeight += weight;
@@ -1064,137 +963,39 @@ async function findPosition(userEmbedding, userText) {
     if (totalWeight > 0) {
         x /= totalWeight;
         y /= totalWeight;
-    } else {
-        // Fallback: center position with small random offset
-        x = (Math.random() - 0.5) * 0.2;
-        y = (Math.random() - 0.5) * 0.2;
     }
 
-    // Add small jitter to avoid exact overlap
+    // Add jitter
     x += (Math.random() - 0.5) * 0.02;
     y += (Math.random() - 0.5) * 0.02;
 
     return { x, y };
 }
 
-function sampleRandomPoints(arr, n) {
-    const shuffled = [...arr].sort(() => Math.random() - 0.5);
-    return shuffled.slice(0, n);
-}
-
 function cosineSimilarity(a, b) {
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
+    let dot = 0, normA = 0, normB = 0;
     for (let i = 0; i < a.length; i++) {
-        dotProduct += a[i] * b[i];
+        dot += a[i] * b[i];
         normA += a[i] * a[i];
         normB += b[i] * b[i];
     }
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB) + 1e-8);
+    return dot / (Math.sqrt(normA) * Math.sqrt(normB) + 1e-8);
 }
 
 function findNearestCluster(position) {
-    // Find the cluster of the nearest existing point
-    let nearestDist = Infinity;
-    let nearestCluster = 0;
+    let nearest = 0;
+    let minDist = Infinity;
 
     for (const point of points) {
         if (point.isSelf) continue;
         const dist = Math.hypot(position.x - point.x, position.y - point.y);
-        if (dist < nearestDist) {
-            nearestDist = dist;
-            nearestCluster = point.cluster;
+        if (dist < minDist) {
+            minDist = dist;
+            nearest = point.cluster;
         }
     }
 
-    return nearestCluster;
-}
-
-function showYourPosition(cluster) {
-    const positionEl = document.getElementById('your-position');
-    const clusterEl = document.getElementById('your-cluster');
-
-    clusterEl.textContent = cluster;
-    positionEl.classList.remove('hidden');
-
-    // Position the indicator near the self point
-    updateYourPositionIndicator();
-}
-
-function updateYourPositionIndicator() {
-    if (!selfPoint) return;
-
-    const positionEl = document.getElementById('your-position');
-    const [screenX, screenY] = dataToScreen(selfPoint.x, selfPoint.y);
-
-    // Position above the point
-    positionEl.style.left = `${screenX}px`;
-    positionEl.style.top = `${screenY - 50}px`;
-}
-
-// Update position indicator on resize
-window.addEventListener('resize', () => {
-    if (selfPoint) {
-        updateYourPositionIndicator();
-    }
-});
-
-// Override drawPoint to show special styling for self point
-const originalDrawPoint = drawPoint;
-function drawPointWithSelf(point, isHovered, isNeighbor) {
-    if (point.isSelf) {
-        const [x, y] = dataToScreen(point.x, point.y);
-        const color = pointColors.get(point.id) || MODE_CONFIG[mode].getColor(point);
-
-        // Draw pulsing ring animation
-        const time = Date.now() / 1000;
-        const pulseScale = 1 + Math.sin(time * 2) * 0.2;
-
-        // Outer glow
-        const gradient = ctx.createRadialGradient(x, y, 0, x, y, 25 * pulseScale);
-        gradient.addColorStop(0, color + '60');
-        gradient.addColorStop(0.5, color + '30');
-        gradient.addColorStop(1, color + '00');
-        ctx.beginPath();
-        ctx.arc(x, y, 25 * pulseScale, 0, Math.PI * 2);
-        ctx.fillStyle = gradient;
-        ctx.fill();
-
-        // Main point (larger)
-        ctx.beginPath();
-        ctx.arc(x, y, 8, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-
-        // White ring
-        ctx.beginPath();
-        ctx.arc(x, y, 12, 0, Math.PI * 2);
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-
-        // Outer ring
-        ctx.beginPath();
-        ctx.arc(x, y, 18 * pulseScale, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-    } else {
-        originalDrawPoint(point, isHovered, isNeighbor);
-    }
-}
-
-// Replace drawPoint
-drawPoint = drawPointWithSelf;
-
-// Animate self point
-function animateSelfPoint() {
-    if (selfPoint) {
-        render();
-    }
-    requestAnimationFrame(animateSelfPoint);
+    return nearest;
 }
 
 // =============================================================================
@@ -1202,5 +1003,3 @@ function animateSelfPoint() {
 // =============================================================================
 
 init();
-setupSelfSubmission();
-animateSelfPoint();
